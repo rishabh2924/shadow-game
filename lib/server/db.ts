@@ -36,29 +36,21 @@ const cfg = () => ({
 
 function getSslConfig() {
   const { host } = cfg();
-  const caFile = process.env.DB_SSL_CA_FILE;
 
-  if (!caFile) {
-    if (process.env.DB_SSL === "true") {
-      throw new Error(
-        "DB_SSL_CA_FILE must point to your trusted CA certificate."
-      );
-    }
+  const ca = process.env.DB_SSL_CA;
 
-    return undefined;
+  if (!ca) {
+    throw new Error("Missing DB_SSL_CA environment variable");
   }
 
-  const ca = readFileSync(resolve(process.cwd(), caFile), "utf8");
-
   return {
-    ca,
+    ca: ca.replace(/\\n/g, "\n"),
     rejectUnauthorized: true,
     servername: host,
     checkServerIdentity: (_servername: string, cert: tls.PeerCertificate) =>
       tls.checkServerIdentity(host, cert),
   };
 }
-
 function connectionOptions(includeDatabase = true) {
   const { connectHost, port, user, password, database } = cfg();
 
