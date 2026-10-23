@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { BookOpen, Ghost, ListPlus, Play, Plus, RotateCcw, Trophy } from "lucide-react";
+import { BookOpen, Ghost, ListPlus, Play, Plus, RotateCcw, Smartphone, Trophy } from "lucide-react";
 import { useApp } from "@/components/providers/app-provider";
 import { useToast } from "@/components/ui/toast";
 import { Dialog } from "@/components/ui/dialog";
@@ -28,9 +28,10 @@ export function Dashboard() {
       <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-indigo-600/25 via-violet-700/15 to-sky-600/20 p-6 sm:p-10">
         <Ghost className="pointer-events-none absolute -right-6 -top-6 h-48 w-48 text-white/[0.04]" aria-hidden />
         <h1 className="max-w-xl text-3xl font-extrabold tracking-tight text-white sm:text-5xl">One word apart.<br />Who’s the impostor?</h1>
-        <p className="mt-3 max-w-lg text-slate-300">Pass one device around the table. Everyone describes a secret word, but someone has a different one, and someone has none at all.</p>
+        <p className="mt-3 max-w-lg text-slate-300">Everyone joins from their own phone, or pass one device around the table. Everyone describes a secret word, but someone has a different one, and someone has none at all.</p>
         <div className="mt-6 flex flex-wrap gap-3">
-          <Link href="/game/setup" className="btn btn-primary h-12 px-6 text-base"><Play className="h-5 w-5" aria-hidden /> Start new game</Link>
+          <Link href="/online" className="btn btn-primary h-12 px-6 text-base"><Smartphone className="h-5 w-5" aria-hidden /> Play on phones</Link>
+          <Link href="/game/setup" className="btn btn-secondary h-12 px-6 text-base"><Play className="h-5 w-5" aria-hidden /> Pass &amp; play</Link>
           {inProgress && <Link href="/game/play" className="btn btn-secondary h-12 px-6 text-base">Resume game</Link>}
           {s && s.currentPhase === "results" && <Link href="/game/results" className="btn btn-secondary h-12 px-6 text-base"><Trophy className="h-5 w-5" aria-hidden /> Last results</Link>}
         </div>

@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, Gamepad2, Ghost, Home } from "lucide-react";
+import { BookOpen, Gamepad2, Ghost, Home, Smartphone } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/components/providers/app-provider";
 
 const links = [
   { href: "/", label: "Home", icon: Home },
-  { href: "/game/setup", label: "Play", icon: Gamepad2 },
+  { href: "/game/setup", label: "Pass & play", icon: Gamepad2 },
+  { href: "/online", label: "Online", icon: Smartphone },
   { href: "/library", label: "Library", icon: BookOpen },
 ];
 

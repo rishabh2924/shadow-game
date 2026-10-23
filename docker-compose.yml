@@ -1,0 +1,17 @@
+# Optional: a local MariaDB without installing anything.   docker compose up -d
+# Matches .env.example. Change the passwords for anything other than a home network.
+services:
+  mariadb:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: shadow_words
+      MARIADB_USER: shadow
+      MARIADB_PASSWORD: change-me
+      MARIADB_ROOT_PASSWORD: change-me-root
+    ports:
+      - "127.0.0.1:3306:3306"   # only this computer; phones talk to the web app, never to the database
+    volumes:
+      - shadow_words_data:/var/lib/mysql
+volumes:
+  shadow_words_data: {}

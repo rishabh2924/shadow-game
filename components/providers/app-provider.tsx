@@ -9,15 +9,22 @@ import { addPairsToGroup, applyImport, type ConflictMode, type ParsedImport } fr
 import {
   addWordPair, createWordGroup, deleteWordGroup, deleteWordPairs, duplicateWordGroup, updateWordGroup, updateWordPair, type GroupInput,
 } from "@/lib/words/groups";
-import { buildStarterGroups, loadLibrary, saveLibrary } from "@/lib/storage/groups";
+import { buildStarterGroups, loadLibrary, sanitizeGroups, saveLibrary } from "@/lib/storage/groups";
 import { DEFAULT_SETTINGS, DEFAULT_SETUP, loadHistory, loadPrefs, loadSession, saveHistory, savePrefs, saveSession } from "@/lib/storage/sessions";
 import { useToast } from "@/components/ui/toast";
 
 type GroupResult = Result<{ groups: WordGroup[]; group: WordGroup }>;
 
+export type DbStatus = "unknown" | "connected" | "offline";
+
 interface AppCtx {
   hydrated: boolean;
   storageError: string | null;
+  /** MariaDB connection state: the word library is mirrored there so online rooms can use it. */
+  dbStatus: DbStatus;
+  retryDb: () => Promise<void>;
+  /** Resolves true once every library change has reached MariaDB. */
+  flushLibrary: () => Promise<boolean>;
   groups: WordGroup[];
   settings: Settings;
   setup: SetupDraft;
@@ -59,11 +66,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [setup, setSetup] = useState<SetupDraft>(DEFAULT_SETUP);
   const [session, setSessionState] = useState<GameSession | null>(null);
   const [usedPairKeys, setUsed] = useState<string[]>([]);
+  const [dbStatus, setDbStatus] = useState<DbStatus>("unknown");
 
   const groupsRef = useRef<WordGroup[]>([]);
   const sessionRef = useRef<GameSession | null>(null);
   const loadNotice = useRef(false);
   const writeError = useRef<string | null>(null);
+  const lastSynced = useRef<string>("");
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const report = useCallback((r: { ok: true } | { ok: false; error: string }) => {
     if (r.ok) {
@@ -73,6 +83,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setStorageError(r.error);
     }
   }, []);
+
+  const commit = useCallback((next: WordGroup[]) => { groupsRef.current = next; setGroups(next); }, []);
+  const commitSession = useCallback((s: GameSession | null) => { sessionRef.current = s; setSessionState(s); }, []);
+  const apply = useCallback((r: GroupResult): GroupResult => { if (r.ok) commit(r.value.groups); return r; }, [commit]);
+
+  /** Sends the current library to MariaDB (no-op when nothing changed). */
+  const pushLibrary = useCallback(async (): Promise<boolean> => {
+    const json = JSON.stringify(groupsRef.current);
+    if (json === lastSynced.current) return true;
+    try {
+      const res = await fetch("/api/library", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ groups: groupsRef.current }) });
+      if (!res.ok) throw new Error(String(res.status));
+      lastSynced.current = json;
+      setDbStatus("connected");
+      return true;
+    } catch {
+      setDbStatus("offline");
+      return false;
+    }
+  }, []);
+
+  /** MariaDB is the source of truth when it has a library; otherwise the local one is uploaded to it. */
+  const connectDb = useCallback(async () => {
+    try {
+      const res = await fetch("/api/library", { cache: "no-store" });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = (await res.json()) as { groups: unknown[] | null };
+      if (Array.isArray(data.groups)) {
+        const g = sanitizeGroups(data.groups);
+        lastSynced.current = JSON.stringify(g);
+        commit(g);
+        setSetup((s) => (s.selectedGroupIds.some((id) => g.some((x) => x.id === id)) ? s : { ...s, selectedGroupIds: g.filter((x) => x.enabled).map((x) => x.id) }));
+        setDbStatus("connected");
+      } else {
+        lastSynced.current = "";
+        setDbStatus((await pushLibrary()) ? "connected" : "offline");
+      }
+    } catch {
+      setDbStatus("offline");
+    }
+  }, [commit, pushLibrary]);
+
+  const flushLibrary = useCallback(async () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    return pushLibrary();
+  }, [pushLibrary]);
 
   // Load once on the client. Idempotent, so React Strict Mode's double effect is harmless.
   useEffect(() => {
@@ -92,19 +148,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setTimeout(() => toast("Saved library data was unreadable. A backup was kept and starter groups were restored.", "error"), 0);
     }
     setHydrated(true);
-  }, [toast]);
+    void connectDb();
+  }, [toast, connectDb]);
 
   useEffect(() => { if (hydrated) report(saveLibrary(groups)); }, [groups, hydrated, report]);
+  useEffect(() => {
+    if (!hydrated || dbStatus !== "connected") return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => { void pushLibrary(); }, 400);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+  }, [groups, hydrated, dbStatus, pushLibrary]);
   useEffect(() => { if (hydrated) report(savePrefs(settings, setup)); }, [settings, setup, hydrated, report]);
   useEffect(() => { if (hydrated) report(saveSession(session)); }, [session, hydrated, report]);
   useEffect(() => { if (hydrated) report(saveHistory(usedPairKeys)); }, [usedPairKeys, hydrated, report]);
 
-  const commit = useCallback((next: WordGroup[]) => { groupsRef.current = next; setGroups(next); }, []);
-  const commitSession = useCallback((s: GameSession | null) => { sessionRef.current = s; setSessionState(s); }, []);
-  const apply = useCallback((r: GroupResult): GroupResult => { if (r.ok) commit(r.value.groups); return r; }, [commit]);
-
   const value = useMemo<AppCtx>(() => ({
-    hydrated, storageError, groups, settings, setup, session, usedPairKeys,
+    hydrated, storageError, dbStatus, retryDb: connectDb, flushLibrary, groups, settings, setup, session, usedPairKeys,
     setSettings: (patch) => setSettingsState((s) => ({ ...s, ...patch })),
     updateSetup: (patch) => setSetup((s) => ({ ...s, ...(typeof patch === "function" ? patch(s) : patch) })),
     createGroup: (input) => apply(createWordGroup(groupsRef.current, input)),
@@ -181,7 +240,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return r;
     },
     quitGame: () => commitSession(null),
-  }), [hydrated, storageError, groups, settings, setup, session, usedPairKeys, apply, commit, commitSession]);
+  }), [hydrated, storageError, dbStatus, connectDb, flushLibrary, groups, settings, setup, session, usedPairKeys, apply, commit, commitSession]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
